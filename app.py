@@ -1,8 +1,10 @@
 import csv
 import io
+import re
 import string
 import time
 import urllib.parse
+from collections import defaultdict
 import pandas as pd
 import requests
 import streamlit as st
@@ -14,202 +16,172 @@ st.set_page_config(
     layout="wide",
 )
 
+# Initialize Session Search History
+if "search_history" not in st.session_state:
+    st.session_state["search_history"] = []
+
 # --- ADVANCED DESIGNER CSS INJECTION ---
 st.markdown(
     """
     <style>
-    /* 1. Global Page Styling (Theme & Fonts) */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
     
     html, body, [data-testid="stAppViewContainer"] {
-        background-color: #0F172A; /* Premium Dark Sky */
+        background-color: #0F172A;
         color: #F1F5F9;
         font-family: 'Inter', sans-serif !important;
     }
     
-    /* 2. Global Border Radius & Modern Accents */
     div[data-testid="stTextInput"], 
-    div[data-testid="stCheckbox"], 
     button, 
     div.stDataFrame,
-    [data-testid="stMetricValue"],
     .trend-card,
-    .success-card,
-    .dl-btn-container {
+    .success-card {
         border-radius: 12px !important;
         overflow: hidden;
     }
 
-    /* 3. Header Section (Center-aligned, modern font) */
-    .header-container {
-        text-align: center;
-        margin-bottom: 30px;
-    }
+    .header-container { text-align: center; margin-bottom: 30px; }
     .main-header { 
-        font-family: 'Inter', sans-serif;
         font-size: 2.5rem; 
-        color: #F8FAFC; 
         font-weight: 800; 
-        margin-bottom: 0px;
-        background: -webkit-linear-gradient(#3B82F6, #10B981); /* Gradient Accent */
+        background: -webkit-linear-gradient(#3B82F6, #10B981); 
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
     }
-    .sub-header { 
-        font-family: 'Inter', sans-serif;
-        font-size: 1.1rem; 
-        color: #94A3B8; 
-        font-weight: 400;
-        margin-top: -10px;
-        margin-bottom: 10px;
-    }
+    .sub-header { font-size: 1.1rem; color: #94A3B8; font-weight: 400; }
 
-    /* 4. The Inputs & Checkbox */
-    div[data-testid="stTextInput"] > div[data-testid="stMarkdownContainer"] p {
-        font-weight: 600;
-        color: #CBD5E1;
-        margin-bottom: 5px;
-    }
     div[data-testid="stTextInput"] input {
-        background-color: rgba(30, 41, 59, 0.7); /* Translucent input */
+        background-color: rgba(30, 41, 59, 0.7);
         color: #F1F5F9;
         border: 1px solid #334155;
         height: 3em;
-        font-size: 1rem;
-    }
-    div[data-testid="stTextInput"] input:focus {
-        border-color: #3B82F6;
-        box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
-    }
-    label[data-testid="stWidgetLabel"] p {
-        font-weight: 600;
-        color: #CBD5E1;
-    }
-    div[data-testid="stCheckbox"] > label > div[data-testid="stMarkdownContainer"] p {
-        color: #E2E8F0;
-        font-weight: 400;
     }
 
-    /* 5. Main Action Button (Primary Blue Gradient) */
     div[data-testid="stHorizontalBlock"] .stButton>button { 
-        background: linear-gradient(135deg, #2563EB, #1D4ED8); /* Action Gradient */
+        background: linear-gradient(135deg, #2563EB, #1D4ED8); 
         color: white; 
         border: none;
-        border-radius: 8px !important;
         height: 3em; 
         font-weight: 700; 
-        width: 100%; 
-        font-size: 1rem;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
         box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3);
-        transition: all 0.2s ease-in-out;
-    }
-    div[data-testid="stHorizontalBlock"] .stButton>button:hover { 
-        background: linear-gradient(135deg, #3B82F6, #2563EB); /* Hover State */
-        box-shadow: 0 6px 15px rgba(37, 99, 235, 0.5);
-        transform: translateY(-1px);
     }
 
-    /* 6. Cards & Containers (Glassmorphism & Accents) */
     .trend-card {
-        background-color: rgba(30, 41, 59, 0.7); /* Translucent & Blurry */
+        background-color: rgba(30, 41, 59, 0.7);
         padding: 25px;
-        border-radius: 12px;
         border: 1px solid #334155;
-        margin-top: 15px;
         margin-bottom: 25px;
-        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.3);
         backdrop-filter: blur(10px);
     }
     .trend-link {
         display: inline-block;
-        background: linear-gradient(135deg, #3B82F6, #10B981); /* Unique Card Gradient */
+        background: linear-gradient(135deg, #3B82F6, #10B981);
         color: white !important;
         padding: 12px 24px;
         border-radius: 8px;
         text-decoration: none;
         font-weight: 700;
         margin-top: 15px;
-        transition: all 0.2s ease-in-out;
-    }
-    .trend-link:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 6px 15px rgba(59, 130, 246, 0.4);
     }
     
     .success-card {
-        background-color: rgba(16, 185, 129, 0.15); /* Translucent Green */
+        background-color: rgba(16, 185, 129, 0.15);
         color: #10B981;
         border: 1px solid #10B981;
         padding: 15px 20px;
-        border-radius: 12px;
         margin-bottom: 20px;
         font-weight: 600;
     }
-
-    /* 7. Download Button & CSV Icon */
-    .dl-btn-container .stDownloadButton {
-        border-radius: 12px !important;
-    }
-    .dl-btn-container .stDownloadButton>button {
-        background-color: rgba(30, 41, 59, 0.7);
-        color: #CBD5E1;
-        border: 1px solid #334155;
-        height: 2.8em;
-        font-weight: 600;
-    }
-    .dl-btn-container .stDownloadButton>button:hover {
-        background-color: rgba(51, 65, 85, 0.9);
-        border-color: #CBD5E1;
-        color: #F8FAFC;
-    }
-
-    /* 8. Modern DataFrame Styling */
-    div.stDataFrame {
-        border: 1px solid #334155 !important;
-        border-radius: 12px;
-        overflow: hidden;
-    }
-    div.stDataFrame [data-testid="stHeaderCell"] p {
-        color: # CBD5E1 !important;
-        font-weight: 700 !important;
-    }
-
-    /* 9. Progress Bar Modern Styling */
-    div.stProgress > div > div > div > div {
-        background-image: linear-gradient(135deg, #3B82F6, #10B981) !important;
-    }
-
     </style>
 """,
     unsafe_allow_html=True,
 )
 
 
+# --- HELPER FUNCTIONS ---
 def get_google_suggest(query):
-    """Scrapes live autocomplete queries directly from Google's endpoint."""
     encoded_query = urllib.parse.quote(query)
     url = f"http://suggestqueries.google.com/complete/search?client=chrome&q={encoded_query}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
-
     try:
         response = requests.get(url, headers=headers, timeout=5)
         if response.status_code == 200:
-            data = response.json()
-            return data[1]
+            return response.json()[1]
     except Exception:
         pass
     return []
 
 
+def detect_search_intent(keyword):
+    """Heuristic logic to classify search intent."""
+    kw = keyword.lower()
+
+    transactional = [
+        "price",
+        "buy",
+        "cost",
+        "cheap",
+        "shop",
+        "sale",
+        "discount",
+        "bd",
+        "store",
+        "online",
+        "order",
+    ]
+    informational = [
+        "how",
+        "what",
+        "why",
+        "where",
+        "guide",
+        "tips",
+        "tutorial",
+        "meaning",
+        "review",
+        "difference",
+        "wiring",
+        "setup",
+    ]
+    commercial = ["best", "top", "vs", "compare", "rating", "review", "brand"]
+
+    if any(word in kw for word in transactional):
+        return "💳 Transactional"
+    elif any(word in kw for word in commercial):
+        return "🔍 Commercial"
+    elif any(word in kw for word in informational):
+        return "ℹ️ Informational"
+    else:
+        return "🌐 General / Navigational"
+
+
+def cluster_keywords(keywords, seed):
+    """Clusters keywords into groups based on common repeating root words."""
+    clusters = defaultdict(list)
+    stop_words = set(seed.lower().split()).union(
+        {"in", "of", "for", "and", "to", "the", "a", "is", "with", "bd"}
+    )
+
+    for kw in keywords:
+        words = re.findall(r"\w+", kw.lower())
+        meaningful_words = [w for w in words if w not in stop_words]
+
+        if meaningful_words:
+            primary_topic = meaningful_words[0].capitalize()
+            clusters[f"Topic: {primary_topic}"].append(kw)
+        else:
+            clusters["General Variations"].append(kw)
+
+    return clusters
+
+
 def estimate_keyword_difficulty(keyword):
-    """Calculates estimated Keyword Difficulty based on word count intent."""
     words = keyword.split()
     word_count = len(words)
-
     if word_count >= 5:
         return "🟢 Very Easy", "15%"
     elif word_count == 4:
@@ -223,11 +195,8 @@ def estimate_keyword_difficulty(keyword):
 
 
 def generate_keywords(seed, include_questions=True):
-    """Loops through A-Z + Question modifiers to extract 100s of long-tail queries."""
     results = set()
-
-    base_suggestions = get_google_suggest(seed)
-    results.update(base_suggestions)
+    results.update(get_google_suggest(seed))
 
     progress_bar = st.progress(0)
     status_text = st.empty()
@@ -240,10 +209,7 @@ def generate_keywords(seed, include_questions=True):
         current_step += 1
         status_text.text(f"✨ Scanning alphabet... ({letter.upper()})")
         progress_bar.progress(current_step / total_steps)
-
-        query = f"{seed} {letter}"
-        suggestions = get_google_suggest(query)
-        results.update(suggestions)
+        results.update(get_google_suggest(f"{seed} {letter}"))
         time.sleep(0.02)
 
     if include_questions:
@@ -260,10 +226,7 @@ def generate_keywords(seed, include_questions=True):
             current_step += 1
             status_text.text(f"💡 Extracting questions... ({q_word})")
             progress_bar.progress(current_step / total_steps)
-
-            query = f"{q_word} {seed}"
-            suggestions = get_google_suggest(query)
-            results.update(suggestions)
+            results.update(get_google_suggest(f"{q_word} {seed}"))
             time.sleep(0.02)
 
     progress_bar.empty()
@@ -272,12 +235,25 @@ def generate_keywords(seed, include_questions=True):
     return sorted(list(results))
 
 
+# --- SIDEBAR (SEARCH HISTORY) ---
+with st.sidebar:
+    st.title("📜 Search History")
+    if st.session_state["search_history"]:
+        for past_search in reversed(st.session_state["search_history"]):
+            st.code(past_search, language="text")
+        if st.button("Clear History"):
+            st.session_state["search_history"] = []
+            st.rerun()
+    else:
+        st.caption("No previous searches in this session.")
+
+
 # --- UI LAYOUT ---
 st.markdown(
     """
     <div class="header-container">
         <h1 class="main-header">Free Keyword Research Tool & Trends</h1>
-        <p class="sub-header">Live Google Autocomplete Extractor, KD Estimator & Interactive Trend Analysis</p>
+        <p class="sub-header">Autocomplete Extractor, Search Intent AI, Keyword Clustering & Trends</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -288,43 +264,44 @@ col_input, col_action = st.columns([4, 1.2])
 with col_input:
     seed_keyword = st.text_input(
         "Enter Seed Keyword:",
-        placeholder="e.g., best mobile under 20k, solar panel, inverter ac",
+        placeholder="e.g., best mobile under 20k, solar panel bd, inverter ac",
     )
 
 with col_action:
-    st.write("##") # Spacer
+    st.write("##")
     include_questions = st.checkbox("Include Questions", value=True)
-    st.write("##") # Spacer
+    st.write("##")
     search_button = st.button("Search Keywords ✨")
-
-st.markdown("<br>", unsafe_allow_html=True)
 
 if search_button and seed_keyword.strip():
     clean_seed = seed_keyword.strip()
 
-    with st.spinner("Scraping live search queries from Google..."):
+    # Save to Session History
+    if clean_seed not in st.session_state["search_history"]:
+        st.session_state["search_history"].append(clean_seed)
+
+    with st.spinner("Extracting keywords, intent, and clusters..."):
         keywords = generate_keywords(
             clean_seed, include_questions=include_questions
         )
 
     if keywords:
-        # Success Notification Card
         st.markdown(
             f"""
             <div class="success-card">
-                🎉 Found {len(keywords)} long-tail keywords for '{clean_seed}'!
+                🎉 Discovered {len(keywords)} long-tail keywords for '{clean_seed}'!
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        # 1. Google Trends Quick Access Card (Glassmorphism + Accent Gradient Button)
+        # Google Trends Card
         trends_url = f"https://trends.google.com/trends/explore?q={urllib.parse.quote(clean_seed)}"
         st.markdown(
             f"""
             <div class="trend-card">
-                <h3 style="margin-top:0; color:#F8FAFC; font-weight:700;">📈 Search Interest Trend: '{clean_seed}'</h3>
-                <p style="color:#CBD5E1; font-size: 0.95rem; margin-top:-5px;">
+                <h3 style="margin-top:0; color:#F8FAFC;">📈 Search Interest Trend: '{clean_seed}'</h3>
+                <p style="color:#CBD5E1; font-size: 0.95rem;">
                     Analyze regional interest, 12-month popularity trajectory, and breakout topics directly on Google Trends.
                 </p>
                 <a href="{trends_url}" target="_blank" class="trend-link">
@@ -335,49 +312,70 @@ if search_button and seed_keyword.strip():
             unsafe_allow_html=True,
         )
 
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # 2. Build Keyword Results Table
+        # Build Main Data Table
         table_data = []
         for kw in keywords:
             difficulty_label, kd_score = estimate_keyword_difficulty(kw)
+            intent = detect_search_intent(kw)
             table_data.append(
                 {
                     "Keyword": kw,
+                    "Search Intent": intent,
                     "Estimated KD": difficulty_label,
                     "KD Score": kd_score,
                     "Words": len(kw.split()),
                 }
             )
 
-        # 3. CSV Download Setup
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(["Keyword", "Estimated KD", "KD Score", "Word Count"])
-        for row in table_data:
+        # --- TABULAR & CLUSTER VIEWS ---
+        tab1, tab2 = st.tabs(
+            ["📋 All Keywords & Intent", "🧩 Keyword Topic Clusters"]
+        )
+
+        with tab1:
+            # Download CSV
+            output = io.StringIO()
+            writer = csv.writer(output)
             writer.writerow(
                 [
-                    row["Keyword"],
-                    row["Estimated KD"],
-                    row["KD Score"],
-                    row["Words"],
+                    "Keyword",
+                    "Search Intent",
+                    "Estimated KD",
+                    "KD Score",
+                    "Word Count",
                 ]
             )
-        csv_data = output.getvalue()
+            for row in table_data:
+                writer.writerow(
+                    [
+                        row["Keyword"],
+                        row["Search Intent"],
+                        row["Estimated KD"],
+                        row["KD Score"],
+                        row["Words"],
+                    ]
+                )
 
-        col_dl1, col_list_label = st.columns([1, 4])
-        with col_dl1:
-            st.markdown('<div class="dl-btn-container">', unsafe_allow_html=True)
             st.download_button(
                 label="📥 Download CSV",
-                data=csv_data,
+                data=output.getvalue(),
                 file_name=f"{clean_seed.replace(' ', '_')}_keywords.csv",
                 mime="text/csv",
             )
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.dataframe(table_data, use_container_width=True, height=500)
 
-        st.markdown("### Extracted Keyword List")
-        st.dataframe(table_data, use_container_width=True, height=520)
+        with tab2:
+            st.markdown(
+                "### Automatically Grouped Topic Clusters for Content Planning"
+            )
+            clusters = cluster_keywords(keywords, clean_seed)
+
+            for topic, cluster_kws in clusters.items():
+                if len(cluster_kws) > 1:
+                    with st.expander(
+                        f"📁 **{topic}** ({len(cluster_kws)} keywords)"
+                    ):
+                        st.write(cluster_kws)
 
     else:
         st.error("No keywords found. Try a different seed keyword.")
